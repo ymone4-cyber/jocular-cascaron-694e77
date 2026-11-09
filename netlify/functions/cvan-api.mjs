@@ -31,14 +31,29 @@ function cookieValue(request, name) {
   return "";
 }
 
-function sameOrigin(request) {
+function allowedOrigin(request) {
+  const site = request.headers.get("sec-fetch-site");
+  if (site === "cross-site") return false;
+  if (site === "same-origin") return true;
   const origin = request.headers.get("origin");
-  if (!origin || origin !== new URL(request.url).origin) throw new ApiError("Requête refusée.", 403);
-  if (request.headers.get("sec-fetch-site") === "cross-site") throw new ApiError("Requête refusée.", 403);
+  if (!origin || origin === "null") return true;
+  let originHost;
+  try { originHost = new URL(origin).host.toLowerCase(); } catch { return false; }
+  const hosts = new Set();
+  try { hosts.add(new URL(request.url).host.toLowerCase()); } catch {}
+  for (const name of ["host", "x-forwarded-host"]) {
+    const value = request.headers.get(name);
+    if (value) value.split(",").forEach((h) => hosts.add(h.trim().toLowerCase()));
+  }
+  return hosts.has(originHost);
+}
+
+function sameOrigin(request) {
+  if (!allowedOrigin(request)) throw new ApiError("Requête refusée.", 403);
 }
 
 function validTeacherSession(request) {
-  const secret = process.env.CVAN_TEACHER_PASSWORD;
+  const secret = (process.env.CVAN_TEACHER_PASSWORD || "").trim();
   if (!secret) return false;
   const token = cookieValue(request, SESSION_COOKIE);
   const parts = token.split(".");
@@ -52,7 +67,7 @@ function validTeacherSession(request) {
 }
 
 function requireTeacher(request) {
-  const expected = process.env.CVAN_TEACHER_PASSWORD;
+  const expected = (process.env.CVAN_TEACHER_PASSWORD || "").trim();
   if (!expected) throw new ApiError("Configurez CVAN_TEACHER_PASSWORD dans les variables Netlify avec le même mot de passe enseignant.", 503);
   sameOrigin(request);
   if (!validTeacherSession(request)) throw new ApiError("Session expirée. Déverrouillez de nouveau l’espace enseignant.", 401);

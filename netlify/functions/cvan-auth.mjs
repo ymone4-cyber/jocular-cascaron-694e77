@@ -17,9 +17,20 @@ function equalSecret(candidate, expected) {
 }
 
 function sameOrigin(request) {
+  const site = request.headers.get("sec-fetch-site");
+  if (site === "cross-site") return false;
+  if (site === "same-origin") return true;
   const origin = request.headers.get("origin");
-  if (!origin || origin !== new URL(request.url).origin) return false;
-  return request.headers.get("sec-fetch-site") !== "cross-site";
+  if (!origin || origin === "null") return true;
+  let originHost;
+  try { originHost = new URL(origin).host.toLowerCase(); } catch { return false; }
+  const hosts = new Set();
+  try { hosts.add(new URL(request.url).host.toLowerCase()); } catch {}
+  for (const name of ["host", "x-forwarded-host"]) {
+    const value = request.headers.get(name);
+    if (value) value.split(",").forEach((h) => hosts.add(h.trim().toLowerCase()));
+  }
+  return hosts.has(originHost);
 }
 
 function cookie(request, maxAge) {
@@ -49,7 +60,7 @@ export default async function cvanAuth(request) {
     }
 
     if (body.action !== "login") return json({ error: "Action inconnue." }, 404);
-    const expected = process.env.CVAN_TEACHER_PASSWORD;
+    const expected = (process.env.CVAN_TEACHER_PASSWORD || "").trim();
     if (!expected) return json({ error: "Configurez CVAN_TEACHER_PASSWORD dans les variables Netlify." }, 503);
     if (!equalSecret(body.password, expected)) return json({ error: "Mot de passe incorrect." }, 401);
 
@@ -63,7 +74,6 @@ export default async function cvanAuth(request) {
 }
 
 export const config = {
-  path: "/.netlify/functions/cvan-auth",
   rateLimit: {
     windowLimit: 5,
     windowSize: 60,
